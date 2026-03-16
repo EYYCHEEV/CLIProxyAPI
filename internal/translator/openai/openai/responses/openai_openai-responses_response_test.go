@@ -146,3 +146,37 @@ func TestConvertOpenAIChatCompletionsResponseToOpenAIResponses_NoUsageFallsBackT
 		t.Fatalf("response.completed count = %d, want 1", completedCount)
 	}
 }
+
+func TestConvertOpenAIChatCompletionsResponseToOpenAIResponses_RequestFieldsPreservedOnDoneCompletion(t *testing.T) {
+	request := []byte(`{"model":"glm-5","stream":true,"instructions":"keep this","metadata":{"ticket":"123"},"temperature":0.25,"store":true}`)
+	var param any
+
+	events := ConvertOpenAIChatCompletionsResponseToOpenAIResponses(context.Background(), "glm-5", request, request, []byte(`data: {"id":"chatcmpl-4","object":"chat.completion.chunk","created":1773664502,"model":"glm-5","choices":[{"index":0,"delta":{"content":"baseline ok"},"finish_reason":null}]}`), &param)
+	events = append(events, ConvertOpenAIChatCompletionsResponseToOpenAIResponses(context.Background(), "glm-5", request, request, []byte(`data: {"id":"chatcmpl-4","object":"chat.completion.chunk","created":1773664502,"model":"glm-5","choices":[{"index":0,"delta":{"content":""},"finish_reason":"stop"}]}`), &param)...)
+	events = append(events, ConvertOpenAIChatCompletionsResponseToOpenAIResponses(context.Background(), "glm-5", request, request, []byte(`data: [DONE]`), &param)...)
+
+	completedCount := 0
+	for _, chunk := range events {
+		event, data := parseOpenAIResponsesSSEEvent(t, chunk)
+		if event != "response.completed" {
+			continue
+		}
+		completedCount++
+		if data.Get("response.instructions").String() != "keep this" {
+			t.Fatalf("instructions = %q, want %q", data.Get("response.instructions").String(), "keep this")
+		}
+		if data.Get("response.metadata.ticket").String() != "123" {
+			t.Fatalf("metadata.ticket = %q, want %q", data.Get("response.metadata.ticket").String(), "123")
+		}
+		if data.Get("response.temperature").Float() != 0.25 {
+			t.Fatalf("temperature = %v, want %v", data.Get("response.temperature").Float(), 0.25)
+		}
+		if !data.Get("response.store").Bool() {
+			t.Fatalf("store = false, want true")
+		}
+	}
+
+	if completedCount != 1 {
+		t.Fatalf("response.completed count = %d, want 1", completedCount)
+	}
+}
