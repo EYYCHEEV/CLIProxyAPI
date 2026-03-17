@@ -200,11 +200,14 @@ nonstream-keepalive-interval: 0
 #     models: # The models supported by the provider.
 #       - name: "moonshotai/kimi-k2:free" # The actual model name.
 #         alias: "kimi-k2" # The alias used in the API.
+#         native-responses: true # optional: route downstream /v1/responses to upstream /responses for this model
 #       # You may repeat the same alias to build an internal model pool.
 #       # The client still sees only one alias in the model list.
 #       # Requests to that alias will round-robin across the upstream names below,
 #       # and if the chosen upstream fails before producing output, the request will
 #       # continue with the next upstream model in the same alias pool.
+#       # Keep `native-responses` consistent across all entries in the same alias pool.
+#       # Mixed settings are treated as ambiguous and will fall back to chat-completions routing.
 #       - name: "qwen3.5-plus"
 #         alias: "claude-opus-4.66"
 #       - name: "glm-5"

@@ -16,24 +16,30 @@ import (
 )
 
 type usageReporter struct {
-	provider    string
-	model       string
-	authID      string
-	authIndex   string
-	apiKey      string
-	source      string
-	requestedAt time.Time
-	once        sync.Once
+	provider                string
+	model                   string
+	authID                  string
+	authIndex               string
+	apiKey                  string
+	source                  string
+	requestedAt             time.Time
+	reasoningTokensAdditive bool
+	once                    sync.Once
 }
 
 func newUsageReporter(ctx context.Context, provider, model string, auth *cliproxyauth.Auth) *usageReporter {
+	return newUsageReporterWithReasoningMode(ctx, provider, model, auth, providerUsesSeparateReasoningTokens(provider))
+}
+
+func newUsageReporterWithReasoningMode(ctx context.Context, provider, model string, auth *cliproxyauth.Auth, reasoningTokensAdditive bool) *usageReporter {
 	apiKey := apiKeyFromContext(ctx)
 	reporter := &usageReporter{
-		provider:    provider,
-		model:       model,
-		requestedAt: time.Now(),
-		apiKey:      apiKey,
-		source:      resolveUsageSource(auth, apiKey),
+		provider:                provider,
+		model:                   model,
+		requestedAt:             time.Now(),
+		apiKey:                  apiKey,
+		source:                  resolveUsageSource(auth, apiKey),
+		reasoningTokensAdditive: reasoningTokensAdditive,
 	}
 	if auth != nil {
 		reporter.authID = auth.ID
@@ -64,7 +70,7 @@ func (r *usageReporter) publishWithOutcome(ctx context.Context, detail usage.Det
 		return
 	}
 	if detail.TotalTokens == 0 {
-		total := detail.InputTokens + detail.OutputTokens + detail.ReasoningTokens
+		total := inferUsageTotalTokens(detail, r.reasoningTokensAdditive)
 		if total > 0 {
 			detail.TotalTokens = total
 		}
@@ -85,6 +91,23 @@ func (r *usageReporter) publishWithOutcome(ctx context.Context, detail usage.Det
 			Detail:      detail,
 		})
 	})
+}
+
+func inferUsageTotalTokens(detail usage.Detail, reasoningTokensAdditive bool) int64 {
+	total := detail.InputTokens + detail.OutputTokens
+	if reasoningTokensAdditive || (detail.OutputTokens == 0 && detail.ReasoningTokens > 0) {
+		total += detail.ReasoningTokens
+	}
+	return total
+}
+
+func providerUsesSeparateReasoningTokens(provider string) bool {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "gemini", "gemini-cli", "vertex":
+		return true
+	default:
+		return false
+	}
 }
 
 // ensurePublished guarantees that a usage record is emitted exactly once.
@@ -199,6 +222,10 @@ func parseOpenAIUsage(data []byte) usage.Detail {
 	if !usageNode.Exists() {
 		return usage.Detail{}
 	}
+	return parseOpenAIUsageNode(usageNode)
+}
+
+func parseOpenAIUsageNode(usageNode gjson.Result) usage.Detail {
 	inputNode := usageNode.Get("prompt_tokens")
 	if !inputNode.Exists() {
 		inputNode = usageNode.Get("input_tokens")
@@ -236,20 +263,12 @@ func parseOpenAIStreamUsage(line []byte) (usage.Detail, bool) {
 	}
 	usageNode := gjson.GetBytes(payload, "usage")
 	if !usageNode.Exists() {
-		return usage.Detail{}, false
+		usageNode = gjson.GetBytes(payload, "response.usage")
+		if !usageNode.Exists() {
+			return usage.Detail{}, false
+		}
 	}
-	detail := usage.Detail{
-		InputTokens:  usageNode.Get("prompt_tokens").Int(),
-		OutputTokens: usageNode.Get("completion_tokens").Int(),
-		TotalTokens:  usageNode.Get("total_tokens").Int(),
-	}
-	if cached := usageNode.Get("prompt_tokens_details.cached_tokens"); cached.Exists() {
-		detail.CachedTokens = cached.Int()
-	}
-	if reasoning := usageNode.Get("completion_tokens_details.reasoning_tokens"); reasoning.Exists() {
-		detail.ReasoningTokens = reasoning.Int()
-	}
-	return detail, true
+	return parseOpenAIUsageNode(usageNode), true
 }
 
 func parseClaudeUsage(data []byte) usage.Detail {

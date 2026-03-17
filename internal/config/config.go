@@ -505,6 +505,10 @@ type OpenAICompatibilityModel struct {
 
 	// Alias is the model name alias that clients will use to reference this model.
 	Alias string `yaml:"alias" json:"alias"`
+
+	// NativeResponses routes OpenAI Responses requests to the upstream /responses
+	// endpoint for this model instead of emulating Responses over chat completions.
+	NativeResponses bool `yaml:"native-responses,omitempty" json:"native-responses,omitempty"`
 }
 
 func (m OpenAICompatibilityModel) GetName() string  { return m.Name }
@@ -781,6 +785,7 @@ func (cfg *Config) SanitizeOpenAICompatibility() {
 		e.Prefix = normalizeModelPrefix(e.Prefix)
 		e.BaseURL = strings.TrimSpace(e.BaseURL)
 		e.Headers = NormalizeHeaders(e.Headers)
+		e.Models = sanitizeOpenAICompatibilityModels(e.Models)
 		if e.BaseURL == "" {
 			// Skip providers with no base-url; treated as removed
 			continue
@@ -788,6 +793,23 @@ func (cfg *Config) SanitizeOpenAICompatibility() {
 		out = append(out, e)
 	}
 	cfg.OpenAICompatibility = out
+}
+
+func sanitizeOpenAICompatibilityModels(models []OpenAICompatibilityModel) []OpenAICompatibilityModel {
+	if len(models) == 0 {
+		return nil
+	}
+	out := make([]OpenAICompatibilityModel, 0, len(models))
+	for i := range models {
+		model := models[i]
+		model.Name = strings.TrimSpace(model.Name)
+		model.Alias = strings.TrimSpace(model.Alias)
+		if model.Name == "" || model.Alias == "" {
+			continue
+		}
+		out = append(out, model)
+	}
+	return out
 }
 
 // SanitizeCodexKeys removes Codex API key entries missing a BaseURL.

@@ -72,7 +72,7 @@ func (e *OpenAICompatExecutor) HttpRequest(ctx context.Context, auth *cliproxyau
 func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (resp cliproxyexecutor.Response, err error) {
 	baseModel := thinking.ParseSuffix(req.Model).ModelName
 
-	reporter := newUsageReporter(ctx, e.Identifier(), baseModel, auth)
+	reporter := newUsageReporterWithReasoningMode(ctx, e.resolveUsageProvider(auth), baseModel, auth, false)
 	defer reporter.trackFailure(ctx, &err)
 
 	baseURL, apiKey := e.resolveCredentials(auth)
@@ -84,9 +84,14 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 	from := opts.SourceFormat
 	to := sdktranslator.FromString("openai")
 	endpoint := "/chat/completions"
+	requestedModel := payloadRequestedModel(opts, req.Model)
+	nativeResponses := e.shouldUseNativeResponses(auth, requestedModel, baseModel, from, opts.Alt)
 	if opts.Alt == "responses/compact" {
 		to = sdktranslator.FromString("openai-response")
 		endpoint = "/responses/compact"
+	} else if nativeResponses {
+		to = sdktranslator.FromString("openai-response")
+		endpoint = "/responses"
 	}
 	originalPayloadSource := req.Payload
 	if len(opts.OriginalRequest) > 0 {
@@ -95,7 +100,6 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 	originalPayload := originalPayloadSource
 	originalTranslated := sdktranslator.TranslateRequest(from, to, baseModel, originalPayload, opts.Stream)
 	translated := sdktranslator.TranslateRequest(from, to, baseModel, req.Payload, opts.Stream)
-	requestedModel := payloadRequestedModel(opts, req.Model)
 	translated = applyPayloadConfigWithRoot(e.cfg, baseModel, to.String(), "", translated, originalTranslated, requestedModel)
 	if opts.Alt == "responses/compact" {
 		if updated, errDelete := sjson.DeleteBytes(translated, "stream"); errDelete == nil {
@@ -106,6 +110,9 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 	translated, err = thinking.ApplyThinking(translated, req.Model, from.String(), to.String(), e.Identifier())
 	if err != nil {
 		return resp, err
+	}
+	if opts.Alt == "responses/compact" || nativeResponses {
+		translated = e.overrideModel(translated, baseModel)
 	}
 
 	url := strings.TrimSuffix(baseURL, "/") + endpoint
@@ -179,7 +186,7 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (_ *cliproxyexecutor.StreamResult, err error) {
 	baseModel := thinking.ParseSuffix(req.Model).ModelName
 
-	reporter := newUsageReporter(ctx, e.Identifier(), baseModel, auth)
+	reporter := newUsageReporterWithReasoningMode(ctx, e.resolveUsageProvider(auth), baseModel, auth, false)
 	defer reporter.trackFailure(ctx, &err)
 
 	baseURL, apiKey := e.resolveCredentials(auth)
@@ -190,6 +197,13 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 
 	from := opts.SourceFormat
 	to := sdktranslator.FromString("openai")
+	requestedModel := payloadRequestedModel(opts, req.Model)
+	nativeResponses := e.shouldUseNativeResponses(auth, requestedModel, baseModel, from, opts.Alt)
+	endpoint := "/chat/completions"
+	if nativeResponses {
+		to = sdktranslator.FromString("openai-response")
+		endpoint = "/responses"
+	}
 	originalPayloadSource := req.Payload
 	if len(opts.OriginalRequest) > 0 {
 		originalPayloadSource = opts.OriginalRequest
@@ -197,19 +211,23 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 	originalPayload := originalPayloadSource
 	originalTranslated := sdktranslator.TranslateRequest(from, to, baseModel, originalPayload, true)
 	translated := sdktranslator.TranslateRequest(from, to, baseModel, req.Payload, true)
-	requestedModel := payloadRequestedModel(opts, req.Model)
 	translated = applyPayloadConfigWithRoot(e.cfg, baseModel, to.String(), "", translated, originalTranslated, requestedModel)
 
 	translated, err = thinking.ApplyThinking(translated, req.Model, from.String(), to.String(), e.Identifier())
 	if err != nil {
 		return nil, err
 	}
+	if nativeResponses {
+		translated = e.overrideModel(translated, baseModel)
+	}
 
-	// Request usage data in the final streaming chunk so that token statistics
-	// are captured even when the upstream is an OpenAI-compatible provider.
-	translated, _ = sjson.SetBytes(translated, "stream_options.include_usage", true)
+	if !nativeResponses {
+		// Request usage data in the final streaming chunk so that token statistics
+		// are captured even when the upstream is an OpenAI-compatible provider.
+		translated, _ = sjson.SetBytes(translated, "stream_options.include_usage", true)
+	}
 
-	url := strings.TrimSuffix(baseURL, "/") + "/chat/completions"
+	url := strings.TrimSuffix(baseURL, "/") + endpoint
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(translated))
 	if err != nil {
 		return nil, err
@@ -367,15 +385,134 @@ func (e *OpenAICompatExecutor) resolveCompatConfig(auth *cliproxyauth.Auth) *con
 	if v := strings.TrimSpace(auth.Provider); v != "" {
 		candidates = append(candidates, v)
 	}
-	for i := range e.cfg.OpenAICompatibility {
-		compat := &e.cfg.OpenAICompatibility[i]
-		for _, candidate := range candidates {
-			if candidate != "" && strings.EqualFold(strings.TrimSpace(candidate), compat.Name) {
+	if v := strings.TrimSpace(e.provider); v != "" {
+		candidates = append(candidates, v)
+	}
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		for i := range e.cfg.OpenAICompatibility {
+			compat := &e.cfg.OpenAICompatibility[i]
+			if strings.EqualFold(candidate, compat.Name) {
 				return compat
 			}
 		}
 	}
 	return nil
+}
+
+func (e *OpenAICompatExecutor) resolveUsageProvider(auth *cliproxyauth.Auth) string {
+	if compat := e.resolveCompatConfig(auth); compat != nil && strings.TrimSpace(compat.Name) != "" {
+		return strings.TrimSpace(compat.Name)
+	}
+	return e.Identifier()
+}
+
+func (e *OpenAICompatExecutor) resolveCompatModel(auth *cliproxyauth.Auth, requestedModel, upstreamModel string) *config.OpenAICompatibilityModel {
+	compat := e.resolveCompatConfig(auth)
+	if compat == nil {
+		return nil
+	}
+	requestedModel = strings.TrimSpace(requestedModel)
+	upstreamModel = strings.TrimSpace(upstreamModel)
+	if model := findCompatModelByName(compat.Models, upstreamModel); model != nil {
+		return model
+	}
+	if model := findCompatModelByName(compat.Models, requestedModel); model != nil {
+		return model
+	}
+	if model := findCompatAliasModel(compat.Models, upstreamModel); model != nil {
+		return model
+	}
+	if model := findCompatAliasModel(compat.Models, requestedModel); model != nil {
+		return model
+	}
+	return nil
+}
+
+func findCompatModelByName(models []config.OpenAICompatibilityModel, name string) *config.OpenAICompatibilityModel {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil
+	}
+	for i := range models {
+		if strings.EqualFold(name, models[i].Name) {
+			return &models[i]
+		}
+	}
+	return nil
+}
+
+func findCompatAliasModel(models []config.OpenAICompatibilityModel, alias string) *config.OpenAICompatibilityModel {
+	alias = strings.TrimSpace(alias)
+	if alias == "" {
+		return nil
+	}
+	first := -1
+	var nativeResponses bool
+	for i := range models {
+		if !strings.EqualFold(alias, models[i].Alias) {
+			continue
+		}
+		if first == -1 {
+			first = i
+			nativeResponses = models[i].NativeResponses
+			continue
+		}
+		if models[i].NativeResponses != nativeResponses {
+			return nil
+		}
+	}
+	if first == -1 {
+		return nil
+	}
+	return &models[first]
+}
+
+func hasCompatAliasNativeResponsesConflict(models []config.OpenAICompatibilityModel, alias string) bool {
+	alias = strings.TrimSpace(alias)
+	if alias == "" {
+		return false
+	}
+	first := -1
+	var nativeResponses bool
+	for i := range models {
+		if !strings.EqualFold(alias, models[i].Alias) {
+			continue
+		}
+		if first == -1 {
+			first = i
+			nativeResponses = models[i].NativeResponses
+			continue
+		}
+		if models[i].NativeResponses != nativeResponses {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *OpenAICompatExecutor) shouldUseNativeResponses(auth *cliproxyauth.Auth, requestedModel, upstreamModel string, source sdktranslator.Format, alt string) bool {
+	if alt != "" || source != sdktranslator.FromString("openai-response") {
+		return false
+	}
+	compat := e.resolveCompatConfig(auth)
+	if compat == nil {
+		return false
+	}
+	if hasCompatAliasNativeResponsesConflict(compat.Models, requestedModel) {
+		return false
+	}
+	model := e.resolveCompatModel(auth, requestedModel, upstreamModel)
+	if model == nil {
+		return false
+	}
+	if hasCompatAliasNativeResponsesConflict(compat.Models, model.Alias) {
+		return false
+	}
+	return model.NativeResponses
 }
 
 func (e *OpenAICompatExecutor) overrideModel(payload []byte, model string) []byte {
