@@ -493,6 +493,9 @@ type OpenAICompatibilityAPIKey struct {
 	// APIKey is the authentication key for accessing the external API services.
 	APIKey string `yaml:"api-key" json:"api-key"`
 
+	// APIKeyEnv resolves the API key from an environment variable at runtime.
+	APIKeyEnv string `yaml:"api-key-env,omitempty" json:"api-key-env,omitempty"`
+
 	// ProxyURL overrides the global proxy setting for this API key if provided.
 	ProxyURL string `yaml:"proxy-url,omitempty" json:"proxy-url,omitempty"`
 }

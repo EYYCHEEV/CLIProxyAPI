@@ -2,6 +2,7 @@ package synthesizer
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 
@@ -206,9 +207,17 @@ func (s *ConfigSynthesizer) synthesizeOpenAICompat(ctx *SynthesisContext) []*cor
 		for j := range compat.APIKeyEntries {
 			entry := &compat.APIKeyEntries[j]
 			key := strings.TrimSpace(entry.APIKey)
+			keyEnv := strings.TrimSpace(entry.APIKeyEnv)
+			if key == "" && keyEnv != "" {
+				key = strings.TrimSpace(os.Getenv(keyEnv))
+			}
 			proxyURL := strings.TrimSpace(entry.ProxyURL)
 			idKind := fmt.Sprintf("openai-compatibility:%s", providerName)
-			id, token := idGen.Next(idKind, key, base, proxyURL)
+			idSeed := key
+			if idSeed == "" && keyEnv != "" {
+				idSeed = "env:" + keyEnv
+			}
+			id, token := idGen.Next(idKind, idSeed, base, proxyURL)
 			attrs := map[string]string{
 				"source":       fmt.Sprintf("config:%s[%s]", providerName, token),
 				"base_url":     base,
@@ -217,6 +226,9 @@ func (s *ConfigSynthesizer) synthesizeOpenAICompat(ctx *SynthesisContext) []*cor
 			}
 			if compat.Priority != 0 {
 				attrs["priority"] = strconv.Itoa(compat.Priority)
+			}
+			if keyEnv != "" {
+				attrs["api_key_env"] = keyEnv
 			}
 			if key != "" {
 				attrs["api_key"] = key

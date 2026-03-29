@@ -1,6 +1,7 @@
 package synthesizer
 
 import (
+	"os"
 	"testing"
 	"time"
 
@@ -473,6 +474,74 @@ func TestConfigSynthesizer_OpenAICompat_WithModelsHash(t *testing.T) {
 	}
 	if auths[0].Attributes["api_key"] != "key-with-models" {
 		t.Errorf("expected api_key key-with-models, got %s", auths[0].Attributes["api_key"])
+	}
+}
+
+func TestConfigSynthesizer_OpenAICompat_ResolvesAPIKeyEnv(t *testing.T) {
+	synth := NewConfigSynthesizer()
+	t.Setenv("TEST_OPENAI_COMPAT_KEY", "env-key-123")
+	ctx := &SynthesisContext{
+		Config: &config.Config{
+			OpenAICompatibility: []config.OpenAICompatibility{
+				{
+					Name:    "EnvProvider",
+					BaseURL: "https://env.api.com",
+					APIKeyEntries: []config.OpenAICompatibilityAPIKey{
+						{APIKeyEnv: "TEST_OPENAI_COMPAT_KEY"},
+					},
+				},
+			},
+		},
+		Now:         time.Now(),
+		IDGenerator: NewStableIDGenerator(),
+	}
+
+	auths, err := synth.Synthesize(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(auths) != 1 {
+		t.Fatalf("expected 1 auth, got %d", len(auths))
+	}
+	if auths[0].Attributes["api_key"] != "env-key-123" {
+		t.Fatalf("expected env-resolved api_key, got %q", auths[0].Attributes["api_key"])
+	}
+	if auths[0].Attributes["api_key_env"] != "TEST_OPENAI_COMPAT_KEY" {
+		t.Fatalf("expected api_key_env marker, got %q", auths[0].Attributes["api_key_env"])
+	}
+}
+
+func TestConfigSynthesizer_OpenAICompat_MissingAPIKeyEnvKeepsReferenceOnly(t *testing.T) {
+	synth := NewConfigSynthesizer()
+	_ = os.Unsetenv("TEST_OPENAI_COMPAT_KEY_MISSING")
+	ctx := &SynthesisContext{
+		Config: &config.Config{
+			OpenAICompatibility: []config.OpenAICompatibility{
+				{
+					Name:    "MissingEnvProvider",
+					BaseURL: "https://env.api.com",
+					APIKeyEntries: []config.OpenAICompatibilityAPIKey{
+						{APIKeyEnv: "TEST_OPENAI_COMPAT_KEY_MISSING"},
+					},
+				},
+			},
+		},
+		Now:         time.Now(),
+		IDGenerator: NewStableIDGenerator(),
+	}
+
+	auths, err := synth.Synthesize(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(auths) != 1 {
+		t.Fatalf("expected 1 auth, got %d", len(auths))
+	}
+	if _, ok := auths[0].Attributes["api_key"]; ok {
+		t.Fatalf("did not expect api_key when env var is missing")
+	}
+	if auths[0].Attributes["api_key_env"] != "TEST_OPENAI_COMPAT_KEY_MISSING" {
+		t.Fatalf("expected api_key_env marker, got %q", auths[0].Attributes["api_key_env"])
 	}
 }
 

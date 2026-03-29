@@ -950,6 +950,7 @@ func normalizeOpenAICompatibilityEntry(entry *config.OpenAICompatibility) {
 	existing := make(map[string]struct{}, len(entry.APIKeyEntries))
 	for i := range entry.APIKeyEntries {
 		trimmed := strings.TrimSpace(entry.APIKeyEntries[i].APIKey)
+		entry.APIKeyEntries[i].APIKeyEnv = strings.TrimSpace(entry.APIKeyEntries[i].APIKeyEnv)
 		entry.APIKeyEntries[i].APIKey = trimmed
 		if trimmed != "" {
 			existing[trimmed] = struct{}{}
