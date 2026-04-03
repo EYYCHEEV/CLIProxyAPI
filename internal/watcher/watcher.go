@@ -48,6 +48,7 @@ type Watcher struct {
 	fileAuthsByPath   map[string]map[string]*coreauth.Auth
 	lastRemoveTimes   map[string]time.Time
 	lastConfigHash    string
+	lastBundleEnvHash string
 	authQueue         chan<- AuthUpdate
 	currentAuths      map[string]*coreauth.Auth
 	runtimeAuths      map[string]*coreauth.Auth

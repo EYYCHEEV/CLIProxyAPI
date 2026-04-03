@@ -27,11 +27,21 @@ func matchProvider(provider string, targets []string) (string, bool) {
 }
 
 func (w *Watcher) start(ctx context.Context) error {
-	if errAddConfig := w.watcher.Add(w.configPath); errAddConfig != nil {
-		log.Errorf("failed to watch config file %s: %v", w.configPath, errAddConfig)
+	if info, errStat := os.Stat(w.configPath); errStat != nil {
+		log.Errorf("failed to watch config file %s: %v", w.configPath, errStat)
+		return errStat
+	} else if info.IsDir() {
+		errDir := os.ErrInvalid
+		log.Errorf("failed to watch config file %s: path is a directory", w.configPath)
+		return errDir
+	}
+
+	configWatchDir := filepath.Dir(w.configPath)
+	if errAddConfig := w.watcher.Add(configWatchDir); errAddConfig != nil {
+		log.Errorf("failed to watch config directory %s (config: %s): %v", configWatchDir, w.configPath, errAddConfig)
 		return errAddConfig
 	}
-	log.Debugf("watching config file: %s", w.configPath)
+	log.Debugf("watching config directory: %s (config: %s)", configWatchDir, w.configPath)
 
 	if errAddAuthDir := w.watcher.Add(w.authDir); errAddAuthDir != nil {
 		log.Errorf("failed to watch auth directory %s: %v", w.authDir, errAddAuthDir)

@@ -264,6 +264,57 @@ func TestReloadConfigIfChanged_TriggersOnChangeAndSkipsUnchanged(t *testing.T) {
 	}
 }
 
+func TestStartConfigWatchSurvivesRepeatedAtomicReplace(t *testing.T) {
+	tmpDir := t.TempDir()
+	bundleDir := filepath.Join(tmpDir, "bundle")
+	generatedDir := filepath.Join(bundleDir, "generated")
+	authDir := filepath.Join(bundleDir, "auth")
+	if err := os.MkdirAll(generatedDir, 0o755); err != nil {
+		t.Fatalf("failed to create generated dir: %v", err)
+	}
+	if err := os.MkdirAll(authDir, 0o755); err != nil {
+		t.Fatalf("failed to create auth dir: %v", err)
+	}
+
+	configPath := filepath.Join(generatedDir, "cliproxy-config.yaml")
+	initialCfg := &config.Config{Port: 8317, AuthDir: authDir}
+	writeConfigYAML := func(port int) {
+		cfg := &config.Config{Port: port, AuthDir: authDir}
+		data, err := yaml.Marshal(cfg)
+		if err != nil {
+			t.Fatalf("failed to marshal config: %v", err)
+		}
+		writeAtomicFile(t, configPath, data)
+	}
+	writeConfigYAML(initialCfg.Port)
+
+	var reloads int32
+	w, err := NewWatcher(configPath, authDir, func(*config.Config) {
+		atomic.AddInt32(&reloads, 1)
+	})
+	if err != nil {
+		t.Fatalf("failed to create watcher: %v", err)
+	}
+	defer func() {
+		_ = w.Stop()
+	}()
+	w.SetConfig(initialCfg)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := w.Start(ctx); err != nil {
+		t.Fatalf("expected Start to succeed: %v", err)
+	}
+	waitForReloadCount(t, &reloads, 1, "startup reload")
+
+	writeConfigYAML(8318)
+	waitForReloadCount(t, &reloads, 2, "first atomic replace reload")
+
+	writeConfigYAML(8319)
+	waitForReloadCount(t, &reloads, 3, "second atomic replace reload")
+}
+
 func TestStartAndStopSuccess(t *testing.T) {
 	tmpDir := t.TempDir()
 	authDir := filepath.Join(tmpDir, "auth")
@@ -296,6 +347,156 @@ func TestStartAndStopSuccess(t *testing.T) {
 	}
 	if got := atomic.LoadInt32(&reloads); got != 1 {
 		t.Fatalf("expected one reload callback, got %d", got)
+	}
+}
+
+func TestReloadConfigReReadsBundleEnvForAPIKeyEnv(t *testing.T) {
+	tmpDir := t.TempDir()
+	bundleDir := filepath.Join(tmpDir, "bundle")
+	generatedDir := filepath.Join(bundleDir, "generated")
+	authDir := filepath.Join(bundleDir, "auth")
+	if err := os.MkdirAll(generatedDir, 0o755); err != nil {
+		t.Fatalf("failed to create generated dir: %v", err)
+	}
+	if err := os.MkdirAll(authDir, 0o755); err != nil {
+		t.Fatalf("failed to create auth dir: %v", err)
+	}
+
+	configPath := filepath.Join(generatedDir, "cliproxy-config.yaml")
+	cfg := &config.Config{
+		AuthDir: authDir,
+		OpenAICompatibility: []config.OpenAICompatibility{
+			{
+				Name:    "EnvProvider",
+				BaseURL: "https://env.example",
+				APIKeyEntries: []config.OpenAICompatibilityAPIKey{
+					{APIKeyEnv: "PROVIDER_OPENAI_API_KEY"},
+				},
+			},
+		},
+	}
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("failed to marshal config: %v", err)
+	}
+	if err := os.WriteFile(configPath, data, 0o644); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(bundleDir, ".env"), []byte("PROVIDER_OPENAI_API_KEY=updated-value\n"), 0o600); err != nil {
+		t.Fatalf("failed to write bundle env: %v", err)
+	}
+
+	t.Setenv("PROVIDER_OPENAI_API_KEY", "stale-value")
+
+	w := &Watcher{
+		configPath:     configPath,
+		authDir:        authDir,
+		lastAuthHashes: make(map[string]string),
+	}
+
+	w.reloadConfigIfChanged()
+
+	if got := os.Getenv("PROVIDER_OPENAI_API_KEY"); got != "updated-value" {
+		t.Fatalf("expected bundle env to override stale process env, got %q", got)
+	}
+
+	w.clientsMutex.RLock()
+	defer w.clientsMutex.RUnlock()
+	var found bool
+	for _, auth := range w.currentAuths {
+		if auth == nil {
+			continue
+		}
+		if auth.Attributes["api_key_env"] != "PROVIDER_OPENAI_API_KEY" {
+			continue
+		}
+		found = true
+		if got := auth.Attributes["api_key"]; got != "updated-value" {
+			t.Fatalf("expected resolved api_key to use refreshed bundle env, got %q", got)
+		}
+	}
+	if !found {
+		t.Fatal("expected synthesized auth entry for PROVIDER_OPENAI_API_KEY")
+	}
+}
+
+func TestReloadConfigIfChangedReloadsWhenOnlyBundleEnvChanges(t *testing.T) {
+	tmpDir := t.TempDir()
+	bundleDir := filepath.Join(tmpDir, "bundle")
+	generatedDir := filepath.Join(bundleDir, "generated")
+	authDir := filepath.Join(bundleDir, "auth")
+	if err := os.MkdirAll(generatedDir, 0o755); err != nil {
+		t.Fatalf("failed to create generated dir: %v", err)
+	}
+	if err := os.MkdirAll(authDir, 0o755); err != nil {
+		t.Fatalf("failed to create auth dir: %v", err)
+	}
+
+	configPath := filepath.Join(generatedDir, "cliproxy-config.yaml")
+	cfg := &config.Config{
+		AuthDir: authDir,
+		OpenAICompatibility: []config.OpenAICompatibility{
+			{
+				Name:    "EnvProvider",
+				BaseURL: "https://env.example",
+				APIKeyEntries: []config.OpenAICompatibilityAPIKey{
+					{APIKeyEnv: "PROVIDER_OPENAI_API_KEY"},
+				},
+			},
+		},
+	}
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("failed to marshal config: %v", err)
+	}
+	if err := os.WriteFile(configPath, data, 0o644); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	envPath := filepath.Join(bundleDir, ".env")
+	if err := os.WriteFile(envPath, []byte("PROVIDER_OPENAI_API_KEY=first-value\n"), 0o600); err != nil {
+		t.Fatalf("failed to write first bundle env: %v", err)
+	}
+
+	reloads := 0
+	w := &Watcher{
+		configPath:     configPath,
+		authDir:        authDir,
+		lastAuthHashes: make(map[string]string),
+		reloadCallback: func(*config.Config) { reloads++ },
+	}
+
+	t.Setenv("PROVIDER_OPENAI_API_KEY", "stale-value")
+
+	w.reloadConfigIfChanged()
+	if reloads != 1 {
+		t.Fatalf("expected initial reload, got %d", reloads)
+	}
+
+	if err := os.WriteFile(envPath, []byte("PROVIDER_OPENAI_API_KEY=second-value\n"), 0o600); err != nil {
+		t.Fatalf("failed to write second bundle env: %v", err)
+	}
+
+	w.reloadConfigIfChanged()
+	if reloads != 2 {
+		t.Fatalf("expected reload when only bundle env changed, got %d", reloads)
+	}
+
+	var found bool
+	for _, auth := range w.currentAuths {
+		if auth == nil {
+			continue
+		}
+		if auth.Attributes["api_key_env"] != "PROVIDER_OPENAI_API_KEY" {
+			continue
+		}
+		found = true
+		if got := auth.Attributes["api_key"]; got != "second-value" {
+			t.Fatalf("expected synthesized api_key to use updated bundle env, got %q", got)
+		}
+	}
+	if !found {
+		t.Fatal("expected synthesized auth entry for PROVIDER_OPENAI_API_KEY")
 	}
 }
 
@@ -1577,6 +1778,46 @@ func TestScheduleConfigReloadDebounces(t *testing.T) {
 	if w.lastConfigHash == "" {
 		t.Fatal("expected lastConfigHash to be set after reload")
 	}
+}
+
+func writeAtomicFile(t *testing.T, path string, data []byte) {
+	t.Helper()
+
+	dir := filepath.Dir(path)
+	tmpFile, err := os.CreateTemp(dir, filepath.Base(path)+".*.tmp")
+	if err != nil {
+		t.Fatalf("failed to create temp file for atomic write: %v", err)
+	}
+	tmpPath := tmpFile.Name()
+	if _, err := tmpFile.Write(data); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpPath)
+		t.Fatalf("failed to write temp config: %v", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		t.Fatalf("failed to close temp config: %v", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		t.Fatalf("failed to rename temp config into place: %v", err)
+	}
+}
+
+func waitForReloadCount(t *testing.T, counter *int32, expected int32, label string) {
+	t.Helper()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if atomic.LoadInt32(counter) >= expected {
+			if got := atomic.LoadInt32(counter); got != expected {
+				t.Fatalf("unexpected %s count: got %d want %d", label, got, expected)
+			}
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s: got %d want %d", label, atomic.LoadInt32(counter), expected)
 }
 
 func TestPrepareAuthUpdatesLockedForceAndDelete(t *testing.T) {

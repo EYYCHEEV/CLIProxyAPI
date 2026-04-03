@@ -6,9 +6,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"os"
+	"path/filepath"
 	"reflect"
 	"time"
 
+	"github.com/joho/godotenv"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/util"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/watcher/diff"
@@ -52,32 +54,38 @@ func (w *Watcher) reloadConfigIfChanged() {
 	}
 	sum := sha256.Sum256(data)
 	newHash := hex.EncodeToString(sum[:])
+	newBundleEnvHash := w.bundleEnvHash()
 
 	w.clientsMutex.RLock()
 	currentHash := w.lastConfigHash
+	currentBundleEnvHash := w.lastBundleEnvHash
 	w.clientsMutex.RUnlock()
 
-	if currentHash != "" && currentHash == newHash {
-		log.Debugf("config file content unchanged (hash match), skipping reload")
+	if currentHash != "" && currentHash == newHash && currentBundleEnvHash == newBundleEnvHash {
+		log.Debugf("config file content unchanged (config/env hash match), skipping reload")
 		return
 	}
 	log.Infof("config file changed, reloading: %s", w.configPath)
 	if w.reloadConfig() {
 		finalHash := newHash
+		finalBundleEnvHash := newBundleEnvHash
 		if updatedData, errRead := os.ReadFile(w.configPath); errRead == nil && len(updatedData) > 0 {
 			sumUpdated := sha256.Sum256(updatedData)
 			finalHash = hex.EncodeToString(sumUpdated[:])
 		} else if errRead != nil {
 			log.WithError(errRead).Debug("failed to compute updated config hash after reload")
 		}
+		finalBundleEnvHash = w.bundleEnvHash()
 		w.clientsMutex.Lock()
 		w.lastConfigHash = finalHash
+		w.lastBundleEnvHash = finalBundleEnvHash
 		w.clientsMutex.Unlock()
 		w.persistConfigAsync()
 	}
 }
 
 func (w *Watcher) reloadConfig() bool {
+	w.reloadBundleEnv()
 	log.Debug("=========================== CONFIG RELOAD ============================")
 	log.Debugf("starting config reload from: %s", w.configPath)
 
@@ -133,4 +141,58 @@ func (w *Watcher) reloadConfig() bool {
 	log.Infof("config successfully reloaded, triggering client reload")
 	w.reloadClients(authDirChanged, affectedOAuthProviders, forceAuthRefresh)
 	return true
+}
+
+func (w *Watcher) reloadBundleEnv() {
+	if w == nil || w.configPath == "" {
+		return
+	}
+
+	for _, envPath := range w.bundleEnvCandidates() {
+		info, statErr := os.Stat(envPath)
+		if statErr != nil || info.IsDir() {
+			continue
+		}
+		if err := godotenv.Overload(envPath); err != nil {
+			log.WithError(err).Warnf("failed to reload bundle env from %s", envPath)
+		} else {
+			log.Debugf("reloaded bundle env from: %s", envPath)
+		}
+		return
+	}
+}
+
+func (w *Watcher) bundleEnvCandidates() []string {
+	if w == nil || w.configPath == "" {
+		return nil
+	}
+
+	configDir := filepath.Dir(w.configPath)
+	parentDir := filepath.Dir(configDir)
+	candidates := []string{filepath.Join(configDir, ".env")}
+	if filepath.Base(configDir) == "generated" {
+		if parentEnv := filepath.Join(parentDir, ".env"); parentEnv != candidates[0] {
+			candidates = append([]string{parentEnv}, candidates...)
+		}
+	} else if parentEnv := filepath.Join(parentDir, ".env"); parentEnv != candidates[0] {
+		candidates = append(candidates, parentEnv)
+	}
+	return candidates
+}
+
+func (w *Watcher) bundleEnvHash() string {
+	for _, envPath := range w.bundleEnvCandidates() {
+		info, statErr := os.Stat(envPath)
+		if statErr != nil || info.IsDir() {
+			continue
+		}
+		data, readErr := os.ReadFile(envPath)
+		if readErr != nil {
+			log.WithError(readErr).Debugf("failed to read bundle env for hash check: %s", envPath)
+			return ""
+		}
+		sum := sha256.Sum256(data)
+		return hex.EncodeToString(sum[:])
+	}
+	return ""
 }
