@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,9 +16,11 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	internalaccess "github.com/router-for-me/CLIProxyAPI/v6/internal/access"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/watcher/diff"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/watcher/synthesizer"
+	sdkaccess "github.com/router-for-me/CLIProxyAPI/v6/sdk/access"
 	sdkAuth "github.com/router-for-me/CLIProxyAPI/v6/sdk/auth"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
 	"gopkg.in/yaml.v3"
@@ -417,6 +421,79 @@ func TestReloadConfigReReadsBundleEnvForAPIKeyEnv(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("expected synthesized auth entry for PROVIDER_OPENAI_API_KEY")
+	}
+}
+
+func TestReloadConfigReReadsBundleEnvForClientAPIKeyEnv(t *testing.T) {
+	tmpDir := t.TempDir()
+	bundleDir := filepath.Join(tmpDir, "bundle")
+	generatedDir := filepath.Join(bundleDir, "generated")
+	authDir := filepath.Join(bundleDir, "auth")
+	if err := os.MkdirAll(generatedDir, 0o755); err != nil {
+		t.Fatalf("failed to create generated dir: %v", err)
+	}
+	if err := os.MkdirAll(authDir, 0o755); err != nil {
+		t.Fatalf("failed to create auth dir: %v", err)
+	}
+
+	configPath := filepath.Join(generatedDir, "cliproxy-config.yaml")
+	cfg := &config.Config{
+		SDKConfig: config.SDKConfig{
+			APIKeyEnvs: []string{"STRONK_GATEWAY_PUBLIC_API_KEY"},
+		},
+		AuthDir: authDir,
+	}
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("failed to marshal config: %v", err)
+	}
+	if err := os.WriteFile(configPath, data, 0o644); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	envPath := filepath.Join(bundleDir, ".env")
+	if err := os.WriteFile(envPath, []byte("STRONK_GATEWAY_PUBLIC_API_KEY=pub-1\n"), 0o600); err != nil {
+		t.Fatalf("failed to write initial bundle env: %v", err)
+	}
+
+	t.Setenv("STRONK_GATEWAY_PUBLIC_API_KEY", "stale-value")
+
+	manager := sdkaccess.NewManager()
+	w := &Watcher{
+		configPath:     configPath,
+		authDir:        authDir,
+		lastAuthHashes: make(map[string]string),
+		reloadCallback: func(cfg *config.Config) {
+			if _, err := internalaccess.ApplyAccessProviders(manager, nil, cfg); err != nil {
+				t.Fatalf("failed to apply access providers: %v", err)
+			}
+		},
+	}
+
+	w.reloadConfigIfChanged()
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	req.Header.Set("Authorization", "Bearer pub-1")
+	if _, authErr := manager.Authenticate(context.Background(), req); authErr != nil {
+		t.Fatalf("expected pub-1 to authenticate after first reload, got %v", authErr)
+	}
+
+	if err := os.WriteFile(envPath, []byte("STRONK_GATEWAY_PUBLIC_API_KEY=pub-2\n"), 0o600); err != nil {
+		t.Fatalf("failed to write second bundle env: %v", err)
+	}
+
+	w.reloadConfigIfChanged()
+
+	oldReq := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	oldReq.Header.Set("Authorization", "Bearer pub-1")
+	if _, authErr := manager.Authenticate(context.Background(), oldReq); !sdkaccess.IsAuthErrorCode(authErr, sdkaccess.AuthErrorCodeInvalidCredential) {
+		t.Fatalf("expected pub-1 to stop working after env reload, got %#v", authErr)
+	}
+
+	newReq := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	newReq.Header.Set("Authorization", "Bearer pub-2")
+	if _, authErr := manager.Authenticate(context.Background(), newReq); authErr != nil {
+		t.Fatalf("expected pub-2 to authenticate after env reload, got %v", authErr)
 	}
 }
 

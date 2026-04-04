@@ -3,6 +3,7 @@ package configaccess
 import (
 	"context"
 	"net/http"
+	"os"
 	"strings"
 
 	sdkaccess "github.com/router-for-me/CLIProxyAPI/v6/sdk/access"
@@ -16,24 +17,44 @@ func Register(cfg *sdkconfig.SDKConfig) {
 		return
 	}
 
-	keys := normalizeKeys(cfg.APIKeys)
-	if len(keys) == 0 {
+	registered := providerFromConfig(cfg, os.LookupEnv)
+	if registered == nil {
 		sdkaccess.UnregisterProvider(sdkaccess.AccessProviderTypeConfigAPIKey)
 		return
 	}
 
 	sdkaccess.RegisterProvider(
 		sdkaccess.AccessProviderTypeConfigAPIKey,
-		newProvider(sdkaccess.DefaultAccessProviderName, keys),
+		registered,
 	)
 }
 
 type provider struct {
-	name string
-	keys map[string]struct{}
+	name    string
+	keys    map[string]struct{}
+	enforce bool
 }
 
-func newProvider(name string, keys []string) *provider {
+func providerFromConfig(
+	cfg *sdkconfig.SDKConfig,
+	lookupEnv func(string) (string, bool),
+) *provider {
+	if cfg == nil {
+		return nil
+	}
+	keys := normalizeKeys(cfg.APIKeys)
+	keys = normalizeKeys(append(keys, resolveEnvKeys(cfg.APIKeyEnvs, lookupEnv)...))
+	if len(keys) == 0 && len(cfg.APIKeys) == 0 && len(cfg.APIKeyEnvs) == 0 {
+		return nil
+	}
+	return newProvider(
+		sdkaccess.DefaultAccessProviderName,
+		keys,
+		len(cfg.APIKeys) > 0 || len(cfg.APIKeyEnvs) > 0,
+	)
+}
+
+func newProvider(name string, keys []string, enforce bool) *provider {
 	providerName := strings.TrimSpace(name)
 	if providerName == "" {
 		providerName = sdkaccess.DefaultAccessProviderName
@@ -42,7 +63,7 @@ func newProvider(name string, keys []string) *provider {
 	for _, key := range keys {
 		keySet[key] = struct{}{}
 	}
-	return &provider{name: providerName, keys: keySet}
+	return &provider{name: providerName, keys: keySet, enforce: enforce}
 }
 
 func (p *provider) Identifier() string {
@@ -56,7 +77,7 @@ func (p *provider) Authenticate(_ context.Context, r *http.Request) (*sdkaccess.
 	if p == nil {
 		return nil, sdkaccess.NewNotHandledError()
 	}
-	if len(p.keys) == 0 {
+	if len(p.keys) == 0 && !p.enforce {
 		return nil, sdkaccess.NewNotHandledError()
 	}
 	authHeader := r.Header.Get("Authorization")
@@ -70,6 +91,10 @@ func (p *provider) Authenticate(_ context.Context, r *http.Request) (*sdkaccess.
 	}
 	if authHeader == "" && authHeaderGoogle == "" && authHeaderAnthropic == "" && queryKey == "" && queryAuthToken == "" {
 		return nil, sdkaccess.NewNoCredentialsError()
+	}
+
+	if len(p.keys) == 0 {
+		return nil, sdkaccess.NewInvalidCredentialError()
 	}
 
 	apiKey := extractBearerToken(authHeader)
@@ -138,4 +163,29 @@ func normalizeKeys(keys []string) []string {
 		return nil
 	}
 	return normalized
+}
+
+func resolveEnvKeys(
+	envKeys []string,
+	lookupEnv func(string) (string, bool),
+) []string {
+	if len(envKeys) == 0 {
+		return nil
+	}
+	if lookupEnv == nil {
+		lookupEnv = os.LookupEnv
+	}
+	resolved := make([]string, 0, len(envKeys))
+	for _, envKey := range envKeys {
+		trimmedKey := strings.TrimSpace(envKey)
+		if trimmedKey == "" {
+			continue
+		}
+		value, ok := lookupEnv(trimmedKey)
+		if !ok {
+			continue
+		}
+		resolved = append(resolved, value)
+	}
+	return normalizeKeys(resolved)
 }

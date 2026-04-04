@@ -37,6 +37,10 @@ api-keys:
   - "your-api-key-2"
   - "your-api-key-3"
 
+# Or resolve client API keys from the runtime environment.
+# api-key-envs:
+#   - "STRONK_GATEWAY_PUBLIC_API_KEY"
+
 # Enable debug logging
 debug: false
 
