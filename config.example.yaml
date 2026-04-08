@@ -31,15 +31,9 @@ remote-management:
 # Authentication directory (supports ~ for home directory)
 auth-dir: "~/.cli-proxy-api"
 
-# API keys for authentication
-api-keys:
-  - "your-api-key-1"
-  - "your-api-key-2"
-  - "your-api-key-3"
-
-# Or resolve client API keys from the runtime environment.
-# api-key-envs:
-#   - "STRONK_GATEWAY_PUBLIC_API_KEY"
+# Resolve client API keys from the runtime environment.
+api-key-envs:
+  - "STRONK_GATEWAY_PUBLIC_API_KEY"
 
 # Enable debug logging
 debug: false
@@ -245,7 +239,7 @@ nonstream-keepalive-interval: 0
 #   # Optional: Override API key for Amp upstream (otherwise uses env or file)
 #   upstream-api-key: ""
 #   # Per-client upstream API key mapping
-#   # Maps client API keys (from top-level api-keys) to different Amp upstream API keys.
+#   # Maps authenticated client API keys to different Amp upstream API keys.
 #   # Useful when different clients need to use different Amp accounts/quotas.
 #   # If a client key isn't mapped, falls back to upstream-api-key (default behavior).
 #   upstream-api-keys:
