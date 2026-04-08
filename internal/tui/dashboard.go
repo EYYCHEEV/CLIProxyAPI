@@ -24,14 +24,12 @@ type dashboardModel struct {
 	lastConfig    map[string]any
 	lastUsage     map[string]any
 	lastAuthFiles []map[string]any
-	lastAPIKeys   []string
 }
 
 type dashboardDataMsg struct {
 	config    map[string]any
 	usage     map[string]any
 	authFiles []map[string]any
-	apiKeys   []string
 	err       error
 }
 
@@ -49,23 +47,22 @@ func (m dashboardModel) fetchData() tea.Msg {
 	cfg, cfgErr := m.client.GetConfig()
 	usage, usageErr := m.client.GetUsage()
 	authFiles, authErr := m.client.GetAuthFiles()
-	apiKeys, keysErr := m.client.GetAPIKeys()
 
 	var err error
-	for _, e := range []error{cfgErr, usageErr, authErr, keysErr} {
+	for _, e := range []error{cfgErr, usageErr, authErr} {
 		if e != nil {
 			err = e
 			break
 		}
 	}
-	return dashboardDataMsg{config: cfg, usage: usage, authFiles: authFiles, apiKeys: apiKeys, err: err}
+	return dashboardDataMsg{config: cfg, usage: usage, authFiles: authFiles, err: err}
 }
 
 func (m dashboardModel) Update(msg tea.Msg) (dashboardModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case localeChangedMsg:
 		// Re-render immediately with cached data using new locale
-		m.content = m.renderDashboard(m.lastConfig, m.lastUsage, m.lastAuthFiles, m.lastAPIKeys)
+		m.content = m.renderDashboard(m.lastConfig, m.lastUsage, m.lastAuthFiles)
 		m.viewport.SetContent(m.content)
 		// Also fetch fresh data in background
 		return m, m.fetchData
@@ -80,9 +77,8 @@ func (m dashboardModel) Update(msg tea.Msg) (dashboardModel, tea.Cmd) {
 			m.lastConfig = msg.config
 			m.lastUsage = msg.usage
 			m.lastAuthFiles = msg.authFiles
-			m.lastAPIKeys = msg.apiKeys
 
-			m.content = m.renderDashboard(msg.config, msg.usage, msg.authFiles, msg.apiKeys)
+			m.content = m.renderDashboard(msg.config, msg.usage, msg.authFiles)
 		}
 		m.viewport.SetContent(m.content)
 		return m, nil
@@ -121,7 +117,7 @@ func (m dashboardModel) View() string {
 	return m.viewport.View()
 }
 
-func (m dashboardModel) renderDashboard(cfg, usage map[string]any, authFiles []map[string]any, apiKeys []string) string {
+func (m dashboardModel) renderDashboard(cfg, usage map[string]any, authFiles []map[string]any) string {
 	var sb strings.Builder
 
 	sb.WriteString(titleStyle.Render(T("dashboard_title")))
@@ -151,12 +147,12 @@ func (m dashboardModel) renderDashboard(cfg, usage map[string]any, authFiles []m
 		Width(cardWidth).
 		Height(2)
 
-	// Card 1: API Keys
-	keyCount := len(apiKeys)
+	// Card 1: Client key envs
+	keyCount := countStringList(cfg, "api-key-envs")
 	card1 := cardStyle.Render(fmt.Sprintf(
 		"%s\n%s",
 		lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("111")).Render(fmt.Sprintf("🔑 %d", keyCount)),
-		lipgloss.NewStyle().Foreground(colorMuted).Render(T("mgmt_keys")),
+		lipgloss.NewStyle().Foreground(colorMuted).Render(T("client_key_envs")),
 	))
 
 	// Card 2: Auth Files
@@ -304,6 +300,24 @@ func getString(m map[string]any, key string) string {
 		}
 	}
 	return ""
+}
+
+func countStringList(m map[string]any, key string) int {
+	if m == nil {
+		return 0
+	}
+	values, ok := m[key]
+	if !ok || values == nil {
+		return 0
+	}
+	switch typed := values.(type) {
+	case []any:
+		return len(typed)
+	case []string:
+		return len(typed)
+	default:
+		return 0
+	}
 }
 
 func getFloat(m map[string]any, key string) float64 {

@@ -1,0 +1,7 @@
+# Override: expose port 1455 for CLIProxyAPI's own browser-based Codex OAuth.
+# Use: docker compose -f docker-compose.yml -f docker-compose.auth.yml up -d
+# Day-to-day this should NOT be used — port 1455 belongs to Codex CLI.
+services:
+  cli-proxy-api:
+    ports:
+      - "1455:1455"
