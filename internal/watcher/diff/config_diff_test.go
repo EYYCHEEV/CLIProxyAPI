@@ -187,7 +187,7 @@ func TestBuildConfigChangeDetails_NilSafe(t *testing.T) {
 func TestBuildConfigChangeDetails_SecretsAndCounts(t *testing.T) {
 	oldCfg := &config.Config{
 		SDKConfig: sdkconfig.SDKConfig{
-			APIKeys: []string{"a"},
+			APIKeyEnvs: []string{"CLIENT_KEY_A"},
 		},
 		AmpCode: config.AmpCode{
 			UpstreamAPIKey: "",
@@ -198,7 +198,7 @@ func TestBuildConfigChangeDetails_SecretsAndCounts(t *testing.T) {
 	}
 	newCfg := &config.Config{
 		SDKConfig: sdkconfig.SDKConfig{
-			APIKeys: []string{"a", "b", "c"},
+			APIKeyEnvs: []string{"CLIENT_KEY_A", "CLIENT_KEY_B", "CLIENT_KEY_C"},
 		},
 		AmpCode: config.AmpCode{
 			UpstreamAPIKey: "new-key",
@@ -209,7 +209,7 @@ func TestBuildConfigChangeDetails_SecretsAndCounts(t *testing.T) {
 	}
 
 	details := BuildConfigChangeDetails(oldCfg, newCfg)
-	expectContains(t, details, "api-keys count: 1 -> 3")
+	expectContains(t, details, "api-key-envs count: 1 -> 3")
 	expectContains(t, details, "ampcode.upstream-api-key: added")
 	expectContains(t, details, "remote-management.secret-key: created")
 }
@@ -234,7 +234,7 @@ func TestBuildConfigChangeDetails_FlagsAndKeys(t *testing.T) {
 		SDKConfig: sdkconfig.SDKConfig{
 			RequestLog:                 false,
 			ProxyURL:                   "http://old-proxy",
-			APIKeys:                    []string{"key-1"},
+			APIKeyEnvs:                 []string{"CLIENT_KEY_1"},
 			ForceModelPrefix:           false,
 			NonStreamKeepAliveInterval: 0,
 		},
@@ -272,7 +272,7 @@ func TestBuildConfigChangeDetails_FlagsAndKeys(t *testing.T) {
 		SDKConfig: sdkconfig.SDKConfig{
 			RequestLog:                 true,
 			ProxyURL:                   "http://new-proxy",
-			APIKeys:                    []string{" key-1 ", "key-2"},
+			APIKeyEnvs:                 []string{" CLIENT_KEY_1 ", "CLIENT_KEY_2"},
 			ForceModelPrefix:           true,
 			NonStreamKeepAliveInterval: 5,
 		},
@@ -293,7 +293,7 @@ func TestBuildConfigChangeDetails_FlagsAndKeys(t *testing.T) {
 	expectContains(t, details, "nonstream-keepalive-interval: 0 -> 5")
 	expectContains(t, details, "quota-exceeded.switch-project: false -> true")
 	expectContains(t, details, "quota-exceeded.switch-preview-model: false -> true")
-	expectContains(t, details, "api-keys count: 1 -> 2")
+	expectContains(t, details, "api-key-envs count: 1 -> 2")
 	expectContains(t, details, "claude-api-key count: 1 -> 2")
 	expectContains(t, details, "codex-api-key count: 1 -> 2")
 	expectContains(t, details, "ampcode.restrict-management-to-localhost: false -> true")
@@ -344,7 +344,7 @@ func TestBuildConfigChangeDetails_AllBranches(t *testing.T) {
 		SDKConfig: sdkconfig.SDKConfig{
 			RequestLog: false,
 			ProxyURL:   "http://old-proxy",
-			APIKeys:    []string{" keyA "},
+			APIKeyEnvs: []string{" CLIENT_KEY_A "},
 		},
 		OAuthExcludedModels: map[string][]string{"p1": {"a"}},
 		OpenAICompatibility: []config.OpenAICompatibility{
@@ -397,7 +397,7 @@ func TestBuildConfigChangeDetails_AllBranches(t *testing.T) {
 		SDKConfig: sdkconfig.SDKConfig{
 			RequestLog: true,
 			ProxyURL:   "http://new-proxy",
-			APIKeys:    []string{"keyB"},
+			APIKeyEnvs: []string{"CLIENT_KEY_B"},
 		},
 		OAuthExcludedModels: map[string][]string{"p1": {"b", "c"}, "p2": {"d"}},
 		OpenAICompatibility: []config.OpenAICompatibility{
@@ -430,7 +430,7 @@ func TestBuildConfigChangeDetails_AllBranches(t *testing.T) {
 	expectContains(t, changes, "ws-auth: false -> true")
 	expectContains(t, changes, "quota-exceeded.switch-project: false -> true")
 	expectContains(t, changes, "quota-exceeded.switch-preview-model: false -> true")
-	expectContains(t, changes, "api-keys: values updated (count unchanged, redacted)")
+	expectContains(t, changes, "api-key-envs: values updated (count unchanged)")
 	expectContains(t, changes, "gemini[0].base-url: http://g-old -> http://g-new")
 	expectContains(t, changes, "gemini[0].proxy-url: http://gp-old -> http://gp-new")
 	expectContains(t, changes, "gemini[0].api-key: updated")

@@ -19,6 +19,7 @@ import (
 
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
+	t.Setenv("STRONK_GATEWAY_PUBLIC_API_KEY", "test-key")
 
 	gin.SetMode(gin.TestMode)
 
@@ -30,7 +31,7 @@ func newTestServer(t *testing.T) *Server {
 
 	cfg := &proxyconfig.Config{
 		SDKConfig: sdkconfig.SDKConfig{
-			APIKeys: []string{"test-key"},
+			APIKeyEnvs: []string{"STRONK_GATEWAY_PUBLIC_API_KEY"},
 		},
 		Port:                   0,
 		AuthDir:                authDir,

@@ -21,6 +21,7 @@ import (
 const (
 	DefaultPanelGitHubRepository = "https://github.com/router-for-me/Cli-Proxy-API-Management-Center"
 	DefaultPprofAddr             = "127.0.0.1:8316"
+	deprecatedTopLevelAPIKeysMsg = `top-level "api-keys" is no longer supported; use "api-key-envs" with environment variables instead`
 )
 
 // Config represents the application's configuration, loaded from a YAML file.
@@ -229,7 +230,7 @@ type AmpCode struct {
 	// UpstreamAPIKey optionally overrides the Authorization header when proxying Amp upstream calls.
 	UpstreamAPIKey string `yaml:"upstream-api-key" json:"upstream-api-key"`
 
-	// UpstreamAPIKeys maps client API keys (from top-level api-keys) to upstream API keys.
+	// UpstreamAPIKeys maps authenticated client API keys to upstream API keys.
 	// When a client authenticates with a key that matches an entry, that upstream key is used.
 	// If no match is found, falls back to UpstreamAPIKey (default behavior).
 	UpstreamAPIKeys []AmpUpstreamAPIKeyEntry `yaml:"upstream-api-keys,omitempty" json:"upstream-api-keys,omitempty"`
@@ -256,7 +257,7 @@ type AmpUpstreamAPIKeyEntry struct {
 	// UpstreamAPIKey is the API key to use when proxying to the Amp upstream.
 	UpstreamAPIKey string `yaml:"upstream-api-key" json:"upstream-api-key"`
 
-	// APIKeys are the client API keys (from top-level api-keys) that map to this upstream key.
+	// APIKeys are the authenticated client API keys that map to this upstream key.
 	APIKeys []string `yaml:"api-keys" json:"api-keys"`
 }
 
@@ -572,6 +573,9 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 		}
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
+	if hasTopLevelYAMLKey(data, "api-keys") {
+		return nil, errors.New(deprecatedTopLevelAPIKeysMsg)
+	}
 
 	// NOTE: Startup legacy key migration is intentionally disabled.
 	// Reason: avoid mutating config.yaml during server startup.
@@ -669,6 +673,31 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 
 	// Return the populated configuration struct.
 	return &cfg, nil
+}
+
+func hasTopLevelYAMLKey(data []byte, key string) bool {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return false
+	}
+
+	var root yaml.Node
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return false
+	}
+	if len(root.Content) == 0 {
+		return false
+	}
+	doc := root.Content[0]
+	if doc == nil || doc.Kind != yaml.MappingNode {
+		return false
+	}
+	for i := 0; i+1 < len(doc.Content); i += 2 {
+		if strings.TrimSpace(doc.Content[i].Value) == key {
+			return true
+		}
+	}
+	return false
 }
 
 // SanitizePayloadRules validates raw JSON payload rule params and drops invalid rules.

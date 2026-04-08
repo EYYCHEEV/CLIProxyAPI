@@ -85,11 +85,11 @@ func BuildConfigChangeDetails(oldCfg, newCfg *config.Config) []string {
 		changes = append(changes, fmt.Sprintf("routing.strategy: %s -> %s", oldCfg.Routing.Strategy, newCfg.Routing.Strategy))
 	}
 
-	// API keys (redacted) and counts
-	if len(oldCfg.APIKeys) != len(newCfg.APIKeys) {
-		changes = append(changes, fmt.Sprintf("api-keys count: %d -> %d", len(oldCfg.APIKeys), len(newCfg.APIKeys)))
-	} else if !reflect.DeepEqual(trimStrings(oldCfg.APIKeys), trimStrings(newCfg.APIKeys)) {
-		changes = append(changes, "api-keys: values updated (count unchanged, redacted)")
+	// API key envs and counts
+	if len(oldCfg.APIKeyEnvs) != len(newCfg.APIKeyEnvs) {
+		changes = append(changes, fmt.Sprintf("api-key-envs count: %d -> %d", len(oldCfg.APIKeyEnvs), len(newCfg.APIKeyEnvs)))
+	} else if !reflect.DeepEqual(trimStrings(oldCfg.APIKeyEnvs), trimStrings(newCfg.APIKeyEnvs)) {
+		changes = append(changes, "api-key-envs: values updated (count unchanged)")
 	}
 	if len(oldCfg.GeminiKey) != len(newCfg.GeminiKey) {
 		changes = append(changes, fmt.Sprintf("gemini-api-key count: %d -> %d", len(oldCfg.GeminiKey), len(newCfg.GeminiKey)))

@@ -42,15 +42,14 @@ func providerFromConfig(
 	if cfg == nil {
 		return nil
 	}
-	keys := normalizeKeys(cfg.APIKeys)
-	keys = normalizeKeys(append(keys, resolveEnvKeys(cfg.APIKeyEnvs, lookupEnv)...))
-	if len(keys) == 0 && len(cfg.APIKeys) == 0 && len(cfg.APIKeyEnvs) == 0 {
+	keys := resolveEnvKeys(cfg.APIKeyEnvs, lookupEnv)
+	if len(keys) == 0 && len(cfg.APIKeyEnvs) == 0 {
 		return nil
 	}
 	return newProvider(
 		sdkaccess.DefaultAccessProviderName,
 		keys,
-		len(cfg.APIKeys) > 0 || len(cfg.APIKeyEnvs) > 0,
+		len(cfg.APIKeyEnvs) > 0,
 	)
 }
 

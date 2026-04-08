@@ -50,8 +50,8 @@ var locales = map[string]map[string]string{
 // ──────────────────────────────────────────
 // Tab names
 // ──────────────────────────────────────────
-var zhTabNames = []string{"仪表盘", "配置", "认证文件", "API 密钥", "OAuth", "使用统计", "日志"}
-var enTabNames = []string{"Dashboard", "Config", "Auth Files", "API Keys", "OAuth", "Usage", "Logs"}
+var zhTabNames = []string{"仪表盘", "配置", "认证文件", "提供商密钥", "OAuth", "使用统计", "日志"}
+var enTabNames = []string{"Dashboard", "Config", "Auth Files", "Provider Keys", "OAuth", "Usage", "Logs"}
 
 // TabNames returns tab names in the current locale.
 func TabNames() []string {
@@ -98,7 +98,7 @@ var zhStrings = map[string]string{
 	"dashboard_title":  "📊 仪表盘",
 	"dashboard_help":   " [r] 刷新 • [↑↓] 滚动",
 	"connected":        "● 已连接",
-	"mgmt_keys":        "管理密钥",
+	"client_key_envs":  "客户端密钥环境变量",
 	"auth_files_label": "认证文件",
 	"active_suffix":    "活跃",
 	"total_requests":   "请求",
@@ -148,20 +148,8 @@ var zhStrings = map[string]string{
 	"status_disabled": "已停用",
 
 	// ── API Keys ──
-	"keys_title":         "🔐 API 密钥",
-	"keys_help":          " [↑↓/jk] 导航 • [a] 添加 • [e] 编辑 • [d] 删除 • [c] 复制 • [r] 刷新",
-	"no_keys":            "  无 API Key，按 [a] 添加",
-	"access_keys":        "Access API Keys",
-	"confirm_delete_key": "⚠ 确认删除 %s? [y/n]",
-	"key_added":          "已添加 API Key",
-	"key_updated":        "已更新 API Key",
-	"key_deleted":        "已删除 API Key",
-	"copied":             "✓ 已复制到剪贴板",
-	"copy_failed":        "✗ 复制失败",
-	"new_key_prompt":     "  New Key: ",
-	"edit_key_prompt":    "  Edit Key: ",
-	"enter_add":          "    Enter: 添加 • Esc: 取消",
-	"enter_save_esc":     "    Enter: 保存 • Esc: 取消",
+	"keys_title": "🔐 提供商密钥",
+	"keys_help":  " [r] 刷新 • [↑↓] 滚动",
 
 	// ── OAuth ──
 	"oauth_title":        "🔐 OAuth 登录",
@@ -249,7 +237,7 @@ var enStrings = map[string]string{
 	"dashboard_title":  "📊 Dashboard",
 	"dashboard_help":   " [r] Refresh • [↑↓] Scroll",
 	"connected":        "● Connected",
-	"mgmt_keys":        "Mgmt Keys",
+	"client_key_envs":  "Client Key Envs",
 	"auth_files_label": "Auth Files",
 	"active_suffix":    "active",
 	"total_requests":   "Requests",
@@ -299,20 +287,8 @@ var enStrings = map[string]string{
 	"status_disabled": "disabled",
 
 	// ── API Keys ──
-	"keys_title":         "🔐 API Keys",
-	"keys_help":          " [↑↓/jk] Navigate • [a] Add • [e] Edit • [d] Delete • [c] Copy • [r] Refresh",
-	"no_keys":            "  No API Keys. Press [a] to add",
-	"access_keys":        "Access API Keys",
-	"confirm_delete_key": "⚠ Delete %s? [y/n]",
-	"key_added":          "API Key added",
-	"key_updated":        "API Key updated",
-	"key_deleted":        "API Key deleted",
-	"copied":             "✓ Copied to clipboard",
-	"copy_failed":        "✗ Copy failed",
-	"new_key_prompt":     "  New Key: ",
-	"edit_key_prompt":    "  Edit Key: ",
-	"enter_add":          "    Enter: Add • Esc: Cancel",
-	"enter_save_esc":     "    Enter: Save • Esc: Cancel",
+	"keys_title": "🔐 Provider Keys",
+	"keys_help":  " [r] Refresh • [↑↓] Scroll",
 
 	// ── OAuth ──
 	"oauth_title":        "🔐 OAuth Login",
